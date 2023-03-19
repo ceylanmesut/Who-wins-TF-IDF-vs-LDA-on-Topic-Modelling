@@ -5,7 +5,7 @@ import nltk
 
 import numpy as np
 import pandas as pd
-# from  collections import Counter
+from  collections import Counter
 
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -13,7 +13,7 @@ nltk.download('stopwords')
 stopwords = nltk.corpus.stopwords.words('english')
 
 
-def prep_process_tokenize(text, stopwords):
+def prep_process_tokenize(text):
     
     """Text cleaner.
     Args:
@@ -24,13 +24,24 @@ def prep_process_tokenize(text, stopwords):
     """
     
     # cleaning the URLs, email and any punctuation existing
-    text = re.sub("((\S+)?(http(s)?)(\S+))|((\S+)?(www)(\S+))|((\S+)?(\@)(\S+)?)", " ", text)
-    text = re.sub("[^a-zA-Z ]", "", text)
+    text = re.sub("((\S+)?(http(s)?)(\S+))|((\S+)?(www)(\S+))|((\S+)?(\@)(\S+)?)", " ", str(text))
+    text = re.sub("[^a-zA-Z ]", "", str(text))
+    text = re.sub("[0-9]", "", str(text))
     text = text.lower() # lower casing the text
     text = nltk.word_tokenize(text) # tokenizing
     
+    stopwords = nltk.corpus.stopwords.words('english')
+    ext_stopwords = extend_stopwords(stopwords)
+    
+    
     # removing stopwords
-    text = [word for word in text if word not in stopwords]
+    text = [word for word in text if word not in ext_stopwords]
+    
+    lemmatizer = nltk.stem.WordNetLemmatizer()
+    text = [lemmatizer.lemmatize(word) for word in text]    
+    
+    stemmer = nltk.stem.PorterStemmer()
+    text = [stemmer.stem(word) for word in text]
     
     return text
 
@@ -50,39 +61,38 @@ def matpad(docmat, num_topics):
         if present == num_topics:
             stub_mat.append(doc)
             continue
-  
+        
+        eps = 0.0000001
         topic_sum = sum(map(lambda x: x[1], doc))
-        reminders = (1 - topic_sum) / (num_topics - len(present)) # TODO: zero encountered in scalar divide
+        reminders = (1 - topic_sum) / ((num_topics - len(present)) + eps)
         d_doc = dict(doc)
         stub_mat.append([d_doc[i] if i in present else reminders for i in range(num_topics)])
         
     return np.asarray(stub_mat)
 
-def pre_process(text, stopwords):
+def pre_process(text):
     
     """Text preprocessor.
     Args:
         text: dataframe, the company data
-        stopwords: list, english stopwords
     Returns:
         text: lower-cased, tokenized and processed text 
     """
     
-    return " ".join(prep_process_tokenize(text,stopwords))
+    return " ".join(prep_process_tokenize(text))
 
-def build_tokenized_col(data, stopwords):
+def build_tokenized_col(data):
     
     """Builds token column.
     Args:
         data: dataframe, the company data
-        stopwords: list, english stopwords
     Returns:
         data: dataframe with token column
     """        
     
     data["tokenized"] = np.nan
     for index in (range(len(data["description"]))):
-        data["tokenized"][index] = pre_process(data["description"][index], stopwords)
+        data["tokenized"][index] = pre_process(data["description"][index])
 
     return(data)
 
@@ -220,7 +230,7 @@ def query_sim(tf_idf, query_index, top_k):
 
     return(related_docs_ind, cos_sim)
 
-def get_result(experiment, data, sim_ind, top_k):
+def get_result_tfidf(data, sim_ind, cosine_sims, top_k):
     
     """Builds result dataframe.
     Args:
@@ -238,9 +248,74 @@ def get_result(experiment, data, sim_ind, top_k):
         answer = data[["name", "description"]][data.index==ind]
         result = pd.concat([result, answer])
     
-    if experiment == "TF-IDF": 
-        result["Cosine Similarities"] = sorted(sim_ind, reverse=True)[: top_k]
+    result["Cosine Similarities"] = sorted(cosine_sims, reverse=True)[: top_k]
+    result.to_excel("tf_idf_results.xlsx")
 
+    return result
+
+
+def save_tf_idf_scores(tfidf, vectorizer, query_index):
+    
+    tfidf_output = tfidf[query_index]
+    df_tfidf = pd.DataFrame(tfidf_output.T.todense(), index=vectorizer.get_feature_names_out(), columns=['tf-idf'])
+    analysis = df_tfidf.sort_values(by=["tf-idf"], ascending=False)
+    
+    scores = analysis.head(20)
+    scores.to_excel("tf_idf_scores_%s.xlsx" % query_index)
+
+
+def get_result_lda(data, sim_ind):
+    
+    """Builds result dataframe.
+    Args:
+        experiment: str, name of the experiment
+        data: dataframe, the company data
+        sim_ind: array, indicies of the top similar documents 
+        top_k: int, top k similarirty threshold
+    Returns:
+        result: dataframe, contains top k similar company descriptions and names
+    """    
+    
+    result = pd.DataFrame(columns=["name", "description"])
+
+    for ind in sim_ind:
+        answer = data[["name", "description"]][data.index==ind]
+        result = pd.concat([result, answer])
+    
+    result.to_excel("LDA_results.xlsx")
+        
     return result 
     
+    
+def extend_stopwords(stopwords):
+    
+    # data = pd.read_csv("data\\co_data.csv")
+    
+    # corpus = []
+    # for i in range(len(data)):
+    #     for word in data.description[i].split():
+    #         corpus.append(word)
+    
+    # word_count = Counter(corpus)
+    
+    # most_common_words = []
+    # most_common_count = []
+
+    # for i in range(len(word_count.most_common(30))):
+    #     most_common_words.append(word_count.most_common(30)[i][0])
+    #     most_common_count.append(word_count.most_common(30)[i][1])
+        
+
+    # stopwords.extend(most_common_words)
      
+    most_common_words  =['services', 'company', 'construction','management','logistics','service',
+    'solutions','provides','products','customers', 'customers','platform','industry','business','also','offers','software','project',
+    'technology','delivery','equipment','companies','building','design','projects','engineering','quality','include',
+    'provide','based','new', 'us', 'clients', 'solution', 'global', 'international', 'well', 'systems', 'group', 'founded',
+    'users', 'market', 'product', 'provider', 'one']
+    
+    stopwords.extend(most_common_words)
+    
+    return(stopwords)
+    
+    
